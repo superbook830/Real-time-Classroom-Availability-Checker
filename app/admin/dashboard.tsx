@@ -13,11 +13,21 @@ import {
   View
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import BackgroundView from '../../components/BackgroundView'; // Import Background
+import BackgroundView from '../../components/BackgroundView';
 import CustomModal from '../../components/CustomModal';
 import { deleteClassroom, getClassrooms } from '../../services/classroom';
 
-const FILTER_TYPES = ['All', 'Lecture', 'Lab', 'Seminar'];
+// Updated Filter List to match room types
+const FILTER_TYPES = [
+  'All', 
+  'Lecture Hall', 
+  'Laboratory', 
+  'Computer Lab', 
+  'Seminar Room', 
+  'Auditorium', 
+  'Study Hall', 
+  'Conference Room'
+];
 
 export default function AdminDashboard() {
   const router = useRouter();
@@ -56,12 +66,10 @@ export default function AdminDashboard() {
   const applyFilters = (searchText: string, filterType: string, sourceData = rooms) => {
     let result = sourceData;
     
-    // 1. Filter by Type
     if (filterType !== 'All') {
       result = result.filter(room => room.type.toLowerCase().includes(filterType.toLowerCase()));
     }
 
-    // 2. Filter by Search Text
     if (searchText) {
       result = result.filter(room => 
         room.name.toLowerCase().includes(searchText.toLowerCase()) ||
@@ -248,8 +256,6 @@ export default function AdminDashboard() {
 }
 
 const styles = StyleSheet.create({
-  // No container style needed as BackgroundView handles it
-  
   /* Header Styles */
   headerContainer: { 
     backgroundColor: '#004aad', 

@@ -40,7 +40,7 @@ export default function Index() {
             activeOpacity={0.8}
           >
             <Text style={styles.btnTextWhite}>Log In</Text>
-                      <Text style={styles.footerText}>Developed By Marl Laurence Soriano</Text>
+                      
 
           </TouchableOpacity>
 

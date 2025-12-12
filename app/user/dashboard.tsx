@@ -1,7 +1,7 @@
 import { FontAwesome5, MaterialIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect, useRouter } from 'expo-router';
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -15,7 +15,6 @@ import {
   View
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-// ✅ Import correct modal and service types
 import MaintenanceModal from '../../components/MaintenanceModal';
 import WeekCalendar from '../../components/WeekCalendar';
 import { parseNaturalQuery, SearchIntent } from '../../services/aiSearch';
@@ -23,40 +22,29 @@ import { getClassrooms } from '../../services/classroom';
 import { getSchedulesByDay } from '../../services/schedule';
 import { getRoomStatus } from '../../services/status';
 
-// FILTER LIST
 const FILTER_TYPES = [
-  'All', 
-  'Saved', 
-  'Lecture Hall', 
-  'Laboratory', 
-  'Computer Lab', 
-  'Seminar Room', 
-  'Auditorium', 
-  'Study Hall', 
-  'Conference Room'
+  'All', 'Saved', 'Lecture Hall', 'Laboratory', 'Computer Lab', 'Seminar Room', 'Auditorium', 'Study Hall', 'Conference Room'
 ];
 
 // CONFIGURATION
-const START_HOUR = 7; // 7:00 AM
-const END_HOUR = 18;   // 6:00 PM
+const START_HOUR = 7;
+const END_HOUR = 18;
 const HOUR_HEIGHT = 100; 
 const ROOM_WIDTH = 180;  
+const HEADER_HEIGHT = 85; // ✅ INCREASED HEIGHT to prevent text distortion
 
-// MODERN PALETTE
 const COLORS = {
   gridLine: '#f0f0f0',
   timeLabel: '#9aa0a6',
-  
   availableBg: '#f0fff4', 
   availableBorder: '#dcfce7',
-
   occupiedBg: '#ef4444',     
   occupiedBorder: '#b91c1c', 
   occupiedText: '#ffffff',   
-
   maintenanceBg: '#fff7ed',
   maintenanceText: '#c2410c',
-  
+  reservedBg: '#eff6ff',
+  reservedText: '#1e40af',
   currentLine: '#ea4335',
   headerBg: '#ffffff',
   headerText: '#1f2937',
@@ -66,6 +54,11 @@ const COLORS = {
 
 export default function UserDashboard() {
   const router = useRouter();
+
+  // SCROLL SYNC REFS
+  const headerScrollRef = useRef<ScrollView>(null);
+  const bodyScrollRef = useRef<ScrollView>(null);
+
   const [rooms, setRooms] = useState<any[]>([]);
   const [filteredRooms, setFilteredRooms] = useState<any[]>([]);
   const [search, setSearch] = useState('');
@@ -74,8 +67,6 @@ export default function UserDashboard() {
   const [bookmarks, setBookmarks] = useState<number[]>([]); 
   const [selectedDay, setSelectedDay] = useState('Monday');
   const [currentTime, setCurrentTime] = useState(new Date());
-  
-  // AI States
   const [isAiLoading, setIsAiLoading] = useState(false); 
   const [reportModalVisible, setReportModalVisible] = useState(false); 
 
@@ -102,12 +93,7 @@ export default function UserDashboard() {
     else newBookmarks = [...bookmarks, id]; 
     setBookmarks(newBookmarks);
     await AsyncStorage.setItem('user_bookmarks', JSON.stringify(newBookmarks));
-    
-    // Re-apply filters if currently viewing 'Saved'
-    if (selectedFilter === 'Saved') {
-      // Pass empty intent to satisfy type checker
-       applyFilters(search, selectedFilter, rooms, newBookmarks, {});
-    }
+    if (selectedFilter === 'Saved') applyFilters(search, selectedFilter, rooms, newBookmarks, {});
   };
 
   const loadData = () => {
@@ -118,14 +104,12 @@ export default function UserDashboard() {
       return { ...room, ...statusInfo, dailySchedule };
     });
     setRooms(roomsWithData);
-    // Initial load with empty AI intent
     applyFilters(search, selectedFilter, roomsWithData, bookmarks, {});
   };
 
   useFocusEffect(useCallback(() => { loadData(); }, [selectedDay, bookmarks])); 
   useEffect(() => { const interval = setInterval(loadData, 60000); return () => clearInterval(interval); }, [selectedDay]);
 
-  // --- PARSE TIME HELPER ---
   const parseTime = (timeStr: string) => {
     if (!timeStr) return 0;
     const [time, modifier] = timeStr.split(' ');
@@ -135,17 +119,15 @@ export default function UserDashboard() {
     return hours + minutes / 60;
   };
 
-  // --- ADVANCED FILTERING LOGIC ---
   const applyFilters = (
     searchText: string, 
     filterType: string, 
     sourceData = rooms, 
     currentBookmarks = bookmarks,
-    aiIntent: SearchIntent = {} // Default empty object to prevent undefined errors
+    aiIntent: SearchIntent = {}
   ) => {
     let result = sourceData;
 
-    // 1. Filter by Bookmarks / Type
     if (filterType === 'Saved') {
       result = result.filter(room => currentBookmarks.includes(room.id));
     } else if (filterType !== 'All') {
@@ -156,7 +138,6 @@ export default function UserDashboard() {
       });
     }
 
-    // 2. Filter by Search Text
     if (searchText) {
       result = result.filter(room => 
         room.name.toLowerCase().includes(searchText.toLowerCase()) ||
@@ -164,14 +145,11 @@ export default function UserDashboard() {
       );
     }
 
-    // 3. Filter by Time Availability (AI)
     if (aiIntent.timeStart !== null && aiIntent.timeEnd !== null && aiIntent.timeStart !== undefined) {
       const searchStart = aiIntent.timeStart;
       const searchEnd = aiIntent.timeEnd || searchStart + 1; 
-
       result = result.filter(room => {
         if (!room.dailySchedule || room.dailySchedule.length === 0) return true;
-        
         const hasConflict = room.dailySchedule.some((sch: any) => {
           const classStart = parseTime(sch.startTime);
           const classEnd = parseTime(sch.endTime);
@@ -181,7 +159,6 @@ export default function UserDashboard() {
       });
     }
 
-    // 4. Filter by Status (AI) - With Null Check Fix
     if (aiIntent.targetStatus) {
       const targetStatusLower = aiIntent.targetStatus.toLowerCase();
       result = result.filter(room => 
@@ -196,19 +173,14 @@ export default function UserDashboard() {
   const handleFilterPress = (type: string) => { setSelectedFilter(type); applyFilters(search, type, rooms, bookmarks, {}); };
   const onRefresh = () => { setRefreshing(true); loadData(); setRefreshing(false); };
 
-  // --- AI MAGIC SEARCH ---
   const handleMagicSearch = async () => {
     if (!search.trim()) return;
-    
     setIsAiLoading(true);
     const result = await parseNaturalQuery(search);
     setIsAiLoading(false);
 
     if (result) {
-      // 1. Day
       if (result.day) setSelectedDay(result.day);
-      
-      // 2. Filter Type
       let newFilter = selectedFilter;
       if (result.filterType && FILTER_TYPES.includes(result.filterType)) {
         newFilter = result.filterType;
@@ -217,24 +189,17 @@ export default function UserDashboard() {
         newFilter = 'All';
         setSelectedFilter('All');
       }
-
-      // 3. Keyword
       const keyword = result.searchKeyword || '';
-      if (keyword) setSearch(keyword);
-      else setSearch('');
-
-      // 4. Advanced Params
+      if (keyword) setSearch(keyword); else setSearch('');
+      
       const aiIntent: SearchIntent = {
         timeStart: result.timeStart,
         timeEnd: result.timeEnd,
         targetStatus: result.targetStatus,
-        // Add other AI fields if needed (capacity, equipment)
       };
-
       applyFilters(keyword, newFilter, rooms, bookmarks, aiIntent);
-
     } else {
-      Alert.alert("AI Assistant", "I couldn't understand that query. Try 'Empty labs tomorrow'.");
+      Alert.alert("AI Assistant", "I couldn't understand that query.");
     }
   };
 
@@ -243,11 +208,9 @@ export default function UserDashboard() {
     if (t.includes('computer')) return <MaterialIcons name="computer" size={18} color={COLORS.primary} />;
     if (t.includes('lab')) return <FontAwesome5 name="flask" size={16} color={COLORS.primary} />;
     if (t.includes('lecture')) return <MaterialIcons name="class" size={18} color={COLORS.primary} />;
-    if (t.includes('seminar')) return <MaterialIcons name="meeting-room" size={18} color={COLORS.primary} />;
     return <MaterialIcons name="room" size={18} color={COLORS.primary} />;
   };
 
-  // --- RENDER SCHEDULER (WITH STICKY HEADER FIX) ---
   const renderScheduler = () => {
     const hours = Array.from({ length: END_HOUR - START_HOUR + 1 }, (_, i) => START_HOUR + i);
     const currentHour = currentTime.getHours() + currentTime.getMinutes() / 60;
@@ -257,13 +220,17 @@ export default function UserDashboard() {
     return (
       <View style={styles.schedulerContainer}>
         
-        {/* 1. FIXED HEADER ROW (Sticky Headers) */}
+        {/* FIXED HEADER */}
         <View style={styles.fixedHeaderRow}>
-            {/* 1a. Top-Left Corner Spacer */}
             <View style={styles.timeColumnHeader} /> 
             
-            {/* 1b. Room Headers (Scrollable Horizontally) */}
-            <ScrollView horizontal contentContainerStyle={{flexGrow: 1}} showsHorizontalScrollIndicator={false}>
+            <ScrollView 
+                horizontal 
+                ref={headerScrollRef}
+                scrollEnabled={false} 
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={{flexGrow: 1}}
+            >
                 <View style={styles.roomHeaderRow}>
                    {filteredRooms.map((room) => {
                      const isBookmarked = bookmarks.includes(room.id);
@@ -272,16 +239,10 @@ export default function UserDashboard() {
                          <View style={styles.headerTopRow}>
                             <View style={styles.roomIconBg}>{getRoomIcon(room.type)}</View>
                             <TouchableOpacity onPress={() => toggleBookmark(room.id)} style={styles.miniIconBtn}>
-                               <MaterialIcons 
-                                  name={isBookmarked ? "bookmark" : "bookmark-border"} 
-                                  size={24} 
-                                  color={isBookmarked ? "#f59e0b" : "#9ca3af"} 
-                               />
+                               <MaterialIcons name={isBookmarked ? "bookmark" : "bookmark-border"} size={24} color={isBookmarked ? "#f59e0b" : "#9ca3af"} />
                             </TouchableOpacity>
                          </View>
-                         <TouchableOpacity 
-                            onPress={() => router.push({ pathname: '/user/room-details', params: { roomId: room.id, roomName: room.name, roomType: room.type, roomCapacity: room.capacity, equipment: room.equipment } } as any)}
-                         >
+                         <TouchableOpacity onPress={() => router.push({ pathname: '/user/room-details', params: { roomId: room.id, roomName: room.name, roomType: room.type, roomCapacity: room.capacity, equipment: room.equipment } } as any)}>
                            <Text style={styles.roomHeaderText} numberOfLines={1}>{room.name}</Text>
                            <Text style={styles.roomCapacityText}>{room.type} • {room.capacity} seats</Text>
                          </TouchableOpacity>
@@ -292,7 +253,7 @@ export default function UserDashboard() {
             </ScrollView>
         </View>
 
-        {/* 2. SCROLLABLE BODY (Vertical Scroll) */}
+        {/* SCROLLABLE BODY */}
         <ScrollView 
             style={{ flex: 1 }} 
             showsVerticalScrollIndicator={false}
@@ -300,19 +261,25 @@ export default function UserDashboard() {
             contentContainerStyle={{ paddingBottom: 80 }} 
         >
             <View style={styles.scrollableBody}>
-                {/* 2a. Left Fixed Column: Time Labels (With Z-Index Fix) */}
                 <View style={styles.timeColumnBody}> 
                     {hours.map((hour) => (
                         <View key={hour} style={styles.timeLabelContainer}>
-                            <Text style={styles.timeLabel}>
-                                {hour > 12 ? hour - 12 : hour} {hour >= 12 ? 'PM' : 'AM'}
-                            </Text>
+                            <Text style={styles.timeLabel}>{hour > 12 ? hour - 12 : hour} {hour >= 12 ? 'PM' : 'AM'}</Text>
                         </View>
                     ))}
                 </View>
 
-                {/* 2b. Right Scrollable Area: Rooms Grid */}
-                <ScrollView horizontal contentContainerStyle={{flexGrow: 1}} showsHorizontalScrollIndicator={false}>
+                <ScrollView 
+                    horizontal 
+                    ref={bodyScrollRef}
+                    contentContainerStyle={{flexGrow: 1}} 
+                    showsHorizontalScrollIndicator={false}
+                    scrollEventThrottle={16}
+                    onScroll={(e) => {
+                        const x = e.nativeEvent.contentOffset.x;
+                        headerScrollRef.current?.scrollTo({ x, animated: false });
+                    }}
+                >
                     <View style={styles.gridBody}>
                         <View style={styles.gridLinesContainer}>
                             {hours.map((h, i) => (
@@ -323,11 +290,13 @@ export default function UserDashboard() {
                         <View style={styles.roomColumnsContainer}>
                           {filteredRooms.map((room) => {
                             const isMaintenance = room.status === 'Maintenance';
+                            const isReserved = room.status === 'Reserved';
+                            const isBlocked = isMaintenance || isReserved;
+
                             return (
                               <View key={room.id} style={styles.roomColumn}>
                                  
-                                 {/* AVAILABLE SLOTS */}
-                                 {!isMaintenance && (
+                                 {!isBlocked && (
                                    <View style={[StyleSheet.absoluteFill, { backgroundColor: COLORS.availableBg }]}>
                                      {hours.map((h, i) => (
                                        <View key={i} style={{ height: HOUR_HEIGHT, borderBottomWidth: 1, borderBottomColor: COLORS.availableBorder, borderStyle: 'dashed' }} />
@@ -345,15 +314,22 @@ export default function UserDashboard() {
                                    </View>
                                  )}
 
-                                 {/* OCCUPIED BLOCKS */}
-                                 {!isMaintenance && room.dailySchedule && room.dailySchedule.map((sch: any, index: number) => {
+                                 {/* ✅ RESERVED OVERLAY */}
+                                 {isReserved && (
+                                   <View style={styles.reservedOverlay}>
+                                     <View style={styles.reservedBadge}>
+                                        <MaterialIcons name="lock" size={16} color={COLORS.reservedText} />
+                                        <Text style={styles.reservedText}>Reserved</Text>
+                                     </View>
+                                   </View>
+                                 )}
+
+                                 {!isBlocked && room.dailySchedule && room.dailySchedule.map((sch: any, index: number) => {
                                     const start = parseTime(sch.startTime);
                                     const end = parseTime(sch.endTime);
                                     if (start < START_HOUR || start > END_HOUR) return null;
-
                                     const top = (start - START_HOUR) * HOUR_HEIGHT;
                                     const height = (end - start) * HOUR_HEIGHT;
-
                                     return (
                                       <TouchableOpacity 
                                         key={index} 
@@ -365,15 +341,11 @@ export default function UserDashboard() {
                                           <Text style={styles.eventTitle} numberOfLines={1}>{sch.subject}</Text>
                                           <View style={styles.eventDetailRow}>
                                             <MaterialIcons name="person" size={12} color="rgba(255,255,255,0.9)" />
-                                            <Text style={styles.eventDetailText} numberOfLines={1}>
-                                              {sch.professor || "TBD"} 
-                                            </Text>
+                                            <Text style={styles.eventDetailText} numberOfLines={1}>{sch.professor || "TBD"}</Text>
                                           </View>
                                           <View style={styles.eventDetailRow}>
                                              <MaterialIcons name="access-time" size={12} color="rgba(255,255,255,0.8)" />
-                                             <Text style={styles.eventDetailText}>
-                                               {sch.startTime} - {sch.endTime}
-                                             </Text>
+                                             <Text style={styles.eventDetailText}>{sch.startTime} - {sch.endTime}</Text>
                                           </View>
                                         </View>
                                       </TouchableOpacity>
@@ -383,8 +355,6 @@ export default function UserDashboard() {
                             );
                           })}
                         </View>
-
-                        {/* Current Time Line */}
                         {showCurrentLine && (
                           <View style={[styles.currentLine, { top: currentLineTop }]}>
                             <View style={styles.nowBadge}>
@@ -403,12 +373,7 @@ export default function UserDashboard() {
   return (
     <View style={styles.rootContainer}>
       <StatusBar barStyle="light-content" backgroundColor="#004aad" />
-      
-      {/* SMART MAINTENANCE REPORTING MODAL */}
-      <MaintenanceModal 
-        visible={reportModalVisible} 
-        onClose={() => setReportModalVisible(false)} 
-      />
+      <MaintenanceModal visible={reportModalVisible} onClose={() => setReportModalVisible(false)} />
 
       <SafeAreaView edges={['top', 'left', 'right']} style={{flex: 1}}>
         <View style={styles.headerContent}>
@@ -421,26 +386,11 @@ export default function UserDashboard() {
           </TouchableOpacity>
         </View>
 
-        {/* SEARCH BAR with AI */}
         <View style={styles.searchContainer}>
           <MaterialIcons name="search" size={24} color="#38b6ff" style={styles.searchIcon} />
-          <TextInput 
-            style={styles.searchInput} 
-            placeholder="Ask AI (e.g. 'Empty labs')" 
-            placeholderTextColor="#8fabc2" 
-            value={search} 
-            onChangeText={handleSearch} 
-          />
-          <TouchableOpacity 
-            onPress={handleMagicSearch} 
-            style={{ padding: 8, backgroundColor: '#e0f2fe', borderRadius: 12, marginLeft: 4 }}
-            disabled={isAiLoading}
-          >
-            {isAiLoading ? (
-              <ActivityIndicator size="small" color="#004aad" />
-            ) : (
-              <MaterialIcons name="auto-awesome" size={24} color="#004aad" />
-            )}
+          <TextInput style={styles.searchInput} placeholder="Ask AI (e.g. 'Empty labs')" placeholderTextColor="#8fabc2" value={search} onChangeText={handleSearch} />
+          <TouchableOpacity onPress={handleMagicSearch} style={{ padding: 8, backgroundColor: '#e0f2fe', borderRadius: 12, marginLeft: 4 }} disabled={isAiLoading}>
+            {isAiLoading ? <ActivityIndicator size="small" color="#004aad" /> : <MaterialIcons name="auto-awesome" size={24} color="#004aad" />}
           </TouchableOpacity>
         </View>
 
@@ -457,7 +407,6 @@ export default function UserDashboard() {
         <WeekCalendar selectedDay={selectedDay} onSelectDay={setSelectedDay} />
 
         <View style={styles.body}>
-           {/* NOTE: ScrollView removed from here; now handled inside renderScheduler */}
            {filteredRooms.length > 0 ? (
               renderScheduler()
            ) : (
@@ -469,11 +418,7 @@ export default function UserDashboard() {
         </View>
       </SafeAreaView>
 
-      {/* REPORT ISSUE BUTTON (ORANGE FAB) */}
-      <TouchableOpacity 
-        style={styles.fab} 
-        onPress={() => setReportModalVisible(true)}
-      >
+      <TouchableOpacity style={styles.fab} onPress={() => setReportModalVisible(true)}>
         <MaterialIcons name="report-problem" size={28} color="#fff" />
       </TouchableOpacity>
     </View>
@@ -486,101 +431,96 @@ const styles = StyleSheet.create({
   headerTitle: { fontSize: 22, fontWeight: '800', color: '#ffffff' },
   headerSubtitle: { fontSize: 12, color: '#dbeafe', opacity: 0.9 },
   settingsBtn: { backgroundColor: '#fff', padding: 8, borderRadius: 10 },
-  
-  searchContainer: { 
-    flexDirection: 'row', 
-    alignItems: 'center', 
-    backgroundColor: '#ffffff', 
-    marginHorizontal: 20, 
-    paddingHorizontal: 16, 
-    height: 50, 
-    borderRadius: 16, 
-    marginBottom: 10 
-  },
+  searchContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#ffffff', marginHorizontal: 20, paddingHorizontal: 16, height: 50, borderRadius: 16, marginBottom: 10 },
   searchIcon: { marginRight: 10 },
   searchInput: { flex: 1, fontSize: 16, color: '#002855' },
-
   filterContainer: { marginBottom: 5 },
   filterScroll: { paddingHorizontal: 20, paddingBottom: 5 },
   filterChip: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 14, backgroundColor: 'rgba(255,255,255,0.2)', marginRight: 8 },
   filterChipActive: { backgroundColor: '#fff' },
   filterText: { color: '#dbeafe', fontWeight: '600', fontSize: 12 },
   filterTextActive: { color: '#004aad', fontWeight: 'bold' },
-
   body: { flex: 1, backgroundColor: '#ffffff', borderTopLeftRadius: 24, borderTopRightRadius: 24, overflow: 'hidden' },
-
-  /* NEW SCHEDULER LAYOUT STYLES (MATCHING ADMIN) */
-  schedulerContainer: { flex: 1, flexDirection: 'column' }, // Column for fixed header
+  
+  schedulerContainer: { flex: 1, flexDirection: 'column' }, 
   
   fixedHeaderRow: { 
     flexDirection: 'row', 
     backgroundColor: COLORS.headerBg, 
     borderBottomWidth: 1, 
     borderBottomColor: COLORS.gridLine, 
-    zIndex: 100, // Keeps headers above everything
-    
+    zIndex: 100 
   },
+  
+  // ✅ FIX 1: USE HEADER_HEIGHT and NO MARGIN
   timeColumnHeader: { 
     width: 60, 
-    height: 70, // Matches roomHeaderCell height
+    height: HEADER_HEIGHT, 
     borderRightWidth: 1, 
     borderRightColor: COLORS.gridLine, 
     backgroundColor: '#fff', 
-    marginTop: 20,
+    marginTop: 0 
   },
   
+  // ✅ FIX 2: NO PADDING
   scrollableBody: { 
     flexDirection: 'row', 
     flex: 1, 
-    backgroundColor: '#fff'
+    backgroundColor: '#fff',
+    paddingTop: 0 
   },
   
+  // ✅ FIX 3: NO MARGIN
   timeColumnBody: { 
     width: 60, 
     borderRightWidth: 1, 
     borderRightColor: COLORS.gridLine, 
     backgroundColor: '#fff', 
-    zIndex: 50, // ✅ Z-INDEX FIX: Ensures time labels float above content
-    marginTop: 20,
+    zIndex: 50, 
+    marginTop: 0 
   },
-  /* END NEW STYLES */
 
   timeLabelContainer: { height: HOUR_HEIGHT, justifyContent: 'flex-start', alignItems: 'flex-end', paddingRight: 8 },
-  timeLabel: { fontSize: 11, color: COLORS.timeLabel, fontWeight: '500', transform: [{translateY: -8}] },
+  
+  // ✅ FIX 4: NO TRANSLATE Y (Fixes 7 AM)
+  timeLabel: { fontSize: 11, color: COLORS.timeLabel, fontWeight: '500', transform: [{translateY: 0}] },
 
   roomHeaderRow: { flexDirection: 'row', backgroundColor: '#fff' },
+  
+  // ✅ FIX 5: INCREASED HEIGHT
   roomHeaderCell: { 
     width: ROOM_WIDTH, 
-    height: 70, 
+    height: HEADER_HEIGHT, 
     justifyContent: 'center', 
     borderRightWidth: 1, 
     borderRightColor: COLORS.gridLine, 
-    // Removed bottom border here since it's on the container
-    paddingHorizontal: 10,
-    paddingVertical: 8
+    paddingHorizontal: 10, 
+    paddingVertical: 8 
   },
+  
   headerTopRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4, width: '100%' },
   roomIconBg: { width: 28, height: 28, borderRadius: 6, backgroundColor: '#e0f2fe', justifyContent: 'center', alignItems: 'center' },
-  miniIconBtn: { padding: 6, backgroundColor: '#f3f4f6', borderRadius: 6 },
+  miniIconBtn: { padding: 4, backgroundColor: '#f3f4f6', borderRadius: 4 },
+  
   roomHeaderText: { fontSize: 14, fontWeight: '700', color: COLORS.headerText },
   roomCapacityText: { fontSize: 10, color: COLORS.subText, marginTop: 1 },
-
+  
   gridBody: { position: 'relative' },
   gridLinesContainer: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
   gridLine: { height: HOUR_HEIGHT, borderBottomWidth: 1, borderBottomColor: COLORS.gridLine },
-
   roomColumnsContainer: { flexDirection: 'row' },
-  roomColumn: { 
-    width: ROOM_WIDTH, 
-    borderRightWidth: 1, 
-    borderRightColor: COLORS.gridLine, 
-    position: 'relative', 
-    minHeight: (END_HOUR - START_HOUR + 1) * HOUR_HEIGHT,
-  },
+  roomColumn: { width: ROOM_WIDTH, borderRightWidth: 1, borderRightColor: COLORS.gridLine, position: 'relative', minHeight: (END_HOUR - START_HOUR + 1) * HOUR_HEIGHT },
   
   maintenanceOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: COLORS.maintenanceBg, justifyContent: 'center', alignItems: 'center', zIndex: 5, opacity: 0.95 },
   maintenanceBadge: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#fff', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, borderWidth: 1, borderColor: '#fed7aa', shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 2, elevation: 1 },
   maintenanceText: { color: COLORS.maintenanceText, fontWeight: '700', fontSize: 12 },
+
+  // ✅ RESERVED STYLES
+  reservedOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: COLORS.reservedBg, justifyContent: 'center', alignItems: 'center', zIndex: 5, opacity: 0.95 },
+  reservedBadge: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#fff', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, borderWidth: 1, borderColor: '#bfdbfe', shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 2, elevation: 1 },
+  reservedText: { color: COLORS.reservedText, fontWeight: '700', fontSize: 12 },
+
+  emptySlotClickable: { width: '100%', zIndex: 1 },
 
   eventBlock: {
     position: 'absolute',
@@ -603,12 +543,19 @@ const styles = StyleSheet.create({
   eventTitle: { color: '#fff', fontSize: 13, fontWeight: '800', marginBottom: 4, textShadowColor: 'rgba(0,0,0,0.1)', textShadowOffset: {width: 0, height: 1}, textShadowRadius: 1 },
   eventDetailRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 2 },
   eventDetailText: { color: 'rgba(255,255,255,0.95)', fontSize: 11, fontWeight: '500' },
-
-  currentLine: { position: 'absolute', left: 0, right: 0, height: 2, backgroundColor: COLORS.currentLine, zIndex: 20 },
+  
+  currentLine: { 
+    position: 'absolute', 
+    left: 0, 
+    right: 0, 
+    height: 2, 
+    backgroundColor: COLORS.currentLine, 
+    zIndex: 20,
+    marginTop: -1 
+  },
   nowBadge: { position: 'absolute', left: -40, top: -9, backgroundColor: COLORS.currentLine, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
   nowText: { color: '#fff', fontSize: 9, fontWeight: 'bold' },
 
-  /* NEW ORANGE FAB */
   fab: { 
     position: 'absolute', 
     bottom: 30, 
@@ -616,7 +563,7 @@ const styles = StyleSheet.create({
     width: 56, 
     height: 56, 
     borderRadius: 28, 
-    backgroundColor: '#ea580c', // Orange for Maintenance Reporting
+    backgroundColor: '#ea580c', 
     justifyContent: 'center', 
     alignItems: 'center', 
     elevation: 8, 
